@@ -1,0 +1,293 @@
+---
+title: "Análisis Estadístico Multivariado y Control de Calidad en la Industria Vinícola"
+author: "Valeri Michel Prado Buitrago"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, 
+  warning = FALSE, 
+  message = FALSE, 
+  fig.align = 'center',
+  fig.width = 6,
+  fig.height = 4
+)
+
+# Carga de librerías necesarias
+library(tidyverse)
+library(knitr)
+library(naniar)
+library(gridExtra)
+
+```
+
+# Introducción
+
+```{r introduccion}
+# NOTA: Reemplaza las URL por tus rutas locales si es necesario
+url_red <- "winequality-red.csv"
+url_white <- "winequality-white.csv"
+
+# Lectura de datos (separados por punto y coma de origen)
+datos_rojo <- read_delim(url_red, delim = ";") %>% mutate(tipo_vino = "Tinto")
+datos_blanco <- read_delim(url_white, delim = ";") %>% mutate(tipo_vino = "Blanco")
+
+# 1. UNIFICACIÓN: Combinación de ambas bases de datos
+vinos_total <- bind_rows(datos_rojo, datos_blanco)
+
+# Renombrar columnas para facilitar su manejo en español
+colnames(vinos_total) <- c(
+  "acidez_fija", "acidez_volatil", "acido_citrico", "azucar_residual",
+  "cloruros", "diocido_azufre_libre", "diocido_azufre_total", "densidad",
+  "pH", "sulfatos", "alcohol", "calidad", "tipo_vino"
+)
+
+# 2. CREACIÓN DE VARIABLES REQUERIDAS
+# Variable cualitativa ordinal: Categoría de Calidad
+# Variable tipo Éxito/Fracaso (Cumple/No cumple): Éxito si calidad >= 6
+vinos_total <- vinos_total %>%
+  mutate(
+    categoria_calidad = case_when(
+      calidad <= 4 ~ "Baja",
+      calidad == 5 | calidad == 6 ~ "Media",
+      calidad >= 7 ~ "Alta"
+    ),
+    categoria_calidad = factor(categoria_calidad, levels = c("Baja", "Media", "Alta"), ordered = TRUE),
+    tipo_vino = factor(tipo_vino),
+    cumple_calidad = if_else(calidad >= 6, 1, 0) # 1 = Éxito, 0 = Fracaso
+  )
+```
+
+# Limpieza
+```{r limpieza}
+# Conteo de datos faltantes por variable
+missing_summary <- colSums(is.na(vinos_total))
+kable(as.data.frame(missing_summary), col.names = c("Valores Faltantes"), 
+      caption = "Resumen de vacíos o datos faltantes en la base unificada")
+
+tabla_cat <- vinos_total %>%
+  group_by(categoria_calidad) %>%
+  summarise(
+    Freq_Abs = n(),
+    Freq_Rel = Freq_Abs / nrow(vinos_total),
+    Porcentaje = Freq_Rel * 100
+  ) %>%
+  mutate(
+    Freq_Abs_Acum = cumsum(Freq_Abs),
+    Porcentaje_Acum = cumsum(Porcentaje)
+  )
+
+kable(tabla_cat, digits = 4, caption = "Tabla de frecuencias para la categoría de calidad del vino")
+
+```
+
+# Diagnóstico 
+```{r diagnostico}
+
+# Conteo de datos faltantes por variable
+missing_summary <- colSums(is.na(vinos_total))
+kable(as.data.frame(missing_summary), col.names = c("Valores Faltantes"), 
+      caption = "Resumen de vacíos o datos faltantes en la base unificada")
+
+```
+
+
+# Análisis descriptivo
+
+```{r analisis}
+
+tabla_cat <- vinos_total %>%
+  group_by(categoria_calidad) %>%
+  summarise(
+    Freq_Abs = n(),
+    Freq_Rel = Freq_Abs / nrow(vinos_total),
+    Porcentaje = Freq_Rel * 100
+  ) %>%
+  mutate(
+    Freq_Abs_Acum = cumsum(Freq_Abs),
+    Porcentaje_Acum = cumsum(Porcentaje)
+  )
+
+kable(tabla_cat, digits = 4, caption = "Tabla de frecuencias para la categoría de calidad del vino")
+
+
+```
+
+# Variable Cuantitativa Agrupada
+```{r variable cuanti}
+# Construcción de intervalos para la variable alcohol
+n_clases <- ceiling(1 + 3.322 * log10(nrow(vinos_total)))
+vinos_total <- vinos_total %>%
+  mutate(intervalo_alcohol = cut(alcohol, breaks = n_clases, include.lowest = TRUE))
+
+tabla_num <- vinos_total %>%
+  group_by(intervalo_alcohol) %>%
+  summarise(
+    Freq_Abs = n(),
+    Freq_Rel = Freq_Abs / nrow(vinos_total),
+    Porcentaje = Freq_Rel * 100
+  ) %>%
+  mutate(
+    Freq_Abs_Acum = cumsum(Freq_Abs),
+    Porcentaje_Acum = cumsum(Porcentaje)
+  )
+
+kable(tabla_num, digits = 4, caption = "Tabla de frecuencias agrupadas para el grado alcohólico (%)")
+```
+
+# Graficos 
+
+```{r Graficos}
+# 1. Gráfico de Barras: Distribución por categoría de calidad
+g1 <- ggplot(vinos_total, aes(x = categoria_calidad, fill = categoria_calidad)) +
+  geom_bar(color = "black") +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(title = "Distribución de Categorías de Calidad", x = "Calidad", y = "Frecuencia Absoluta") +
+  theme_minimal() + theme(legend.position = "none")
+
+# 2. Gráfico Circular: Proporción del Tipo de Vino
+datos_pie <- vinos_total %>% group_by(tipo_vino) %>% summarise(count = n())
+g2 <- ggplot(datos_pie, aes(x = "", y = count, fill = tipo_vino)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  scale_fill_manual(values = c("Blanco" = "#F4F6F7", "Tinto" = "#78281F")) +
+  labs(title = "Proporción de Tipo de Vino Analizado") +
+  theme_void()
+
+# 3. Histograma: Distribución de la Acidez Fija
+g3 <- ggplot(vinos_total, aes(x = acidez_fija)) +
+  geom_histogram(bins = 30, fill = "#2E86C1", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de la Acidez Fija", x = "Acidez Fija (g/dm³)", y = "Frecuencia") +
+  theme_minimal()
+
+# 4. Polígono de Frecuencias: Superposición de Grado Alcohólico por Tipo
+g4 <- ggplot(vinos_total, aes(x = alcohol, color = tipo_vino)) +
+  geom_freqpoly(binwidth = 0.3, size = 1.2) +
+  scale_color_manual(values = c("Blanco" = "#F1C40F", "Tinto" = "#943126")) +
+  labs(title = "Polígono de Frecuencia: Alcohol por Tipo", x = "Alcohol (% vol)", y = "Frecuencia") +
+  theme_minimal()
+
+# 5. Diagrama de Caja y Bigotes (Boxplot): Comparación de Acidez Volátil
+g5 <- ggplot(vinos_total, aes(x = tipo_vino, y = acidez_volatil, fill = tipo_vino)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16) +
+  scale_fill_manual(values = c("Blanco" = "#FCF3CF", "Tinto" = "#E6B0AA")) +
+  labs(title = "Boxplot: Acidez Volátil por Tipo de Vino", x = "Tipo de Vino", y = "Acidez Volátil (g/dm³)") +
+  theme_minimal() + theme(legend.position = "none")
+
+# Organizar los 5 gráficos exigidos en un panel estructurado
+grid.arrange(g1, g2, g3, g4, g5, ncol = 2)
+```
+
+# Medidas Descriptivas Numéricas
+
+```{r descriptivas}
+calculas_metricas <- function(variable) {
+  c(
+    Media = mean(variable),
+    Mediana = median(variable),
+    Rango = max(variable) - min(variable),
+    Varianza = var(variable),
+    Desv_Est = sd(variable),
+    CV = (sd(variable) / mean(variable)) * 100,
+    Q1 = quantile(variable, 0.25),
+    Q2 = quantile(variable, 0.50),
+    Q3 = quantile(variable, 0.75),
+    IQR = IQR(variable),
+    P10 = quantile(variable, 0.10),
+    P90 = quantile(variable, 0.90)
+  )
+}
+
+resumen_descriptivo <- data.frame(
+  Acidez_Fija = calculas_metricas(vinos_total$acidez_fija),
+  Alcohol = calculas_metricas(vinos_total$alcohol)
+)
+
+kable(resumen_descriptivo, digits = 4, caption = "Métricas descriptivas obligatorias")
+```
+
+# Modelos probabilisticos y de riesgo
+
+## Modelo normal
+Asumiendo que el grado alcohólico se aproxima a una distribución normal $X \sim N(\mu, \sigma^2)$ dentro de la población de vinos tintos, calculamos sus parámetros descriptivos para estimar riesgos de inconformidad.
+
+```{r modelo normal}
+
+mu_tinto <- mean(datos_rojo$alcohol)
+sd_tinto <- sd(datos_rojo$alcohol)
+```
+
+## Pregunta de riesgo
+¿Cuál es la probabilidad de que un vino tinto elegido al azar presente un grado alcohólico superior a 12% vol ($P(X > 12)$)?
+```{r riesgo}
+
+prob_mayor_12 <- pnorm(12, mean = mu_tinto, sd = sd_tinto, lower.tail = FALSE)
+
+#calculo de puntajes z: estandarizamos los valores para dos muestras específicas del lote: un vino con 10.5% de alcohol y otro con 13%
+
+z1 <- (10.5 - mu_tinto) / sd_tinto
+z2 <- (13 - mu_tinto) / sd_tinto
+
+
+```
+
+Un vino con $10.5\%$ tiene un puntaje $Z = `r round(z1, 4)`$ (está a r round(abs(z1), 2) desviaciones estándar por debajo de la media).
+
+Un vino con $13.0\%$ tiene un puntaje $Z = `r round(z2, 4)`$ (está a r round(z2, 2) desviaciones estándar por encima de la media).
+
+# Model Binomial 
+```{r binomial}
+#probabilidad empírica de éxito en la población global es p = `r round(p_exito, 4)`
+p_exito <- mean(vinos_total$cumple_calidad)
+
+prob_bin_acum <- pbinom(9, size = 15, prob = p_exito, lower.tail = FALSE)
+#Resultado: La probabilidad de que al menos 10 de las 15 botellas cumplan el estándar de calidad es $P(Y \ge 10) = `r round(prob_bin_acum, 4)`$ (equivalente a un r round(prob_bin_acum * 100, 2)%).
+
+```
+# Inferencia Estadísca Obligatoria
+
+```{r inferencia}
+#intervalo de confianza
+
+ic_resultado <- t.test(vinos_total$acidez_fija, conf.level = 0.95)
+
+```
+
+Intervalo del 95% para la media: $[`r round(ic_resultado$conf.int[1], 4)`, `r round(ic_resultado$conf.int[2], 4)`]$ g/dm³.
+
+Interpretación: Tenemos un 95% de confianza estadística de que la verdadera acidez fija promedio de toda la producción de vino se sitúa entre r round(ic_resultado$conf.int[1], 3) y r round(ic_resultado$conf.int[2], 3) gramos por decímetro cúbico.
+
+
+# Prueba de hipotesis
+Contrastamos si existen diferencias estadísticamente significativas en el nivel medio de acidez volátil entre los vinos de tipo Tinto y Blanco.Hipótesis Nula ($H_0$): $\mu_{Tinto} = \mu_{Blanco}$ (No hay diferencias en la acidez volátil promedio).Hipótesis Alternativa ($H_1$): $\mu_{Tinto} \neq \mu_{Blanco}$ (Existe diferencia significativa).Nivel de significancia: $\alpha = 0.05$
+```{r prueba de hipotesis}
+
+prueba_t <- t.test(acidez_volatil ~ tipo_vino, data = vinos_total, alternative = "two.sided")
+
+```
+
+# Compración de tres grupos (análisis de Varianza - ANOVA)
+Evaluamos si la media de la variable cuantitativa alcohol varía en función de la variable cualitativa ordinal categórica (categoria_calidad).$H_0$: $\mu_{Baja} = \mu_{Media} = \mu_{Alta}$ (El grado alcohólico promedio es idéntico en todas las calidades).$H_1$: Al menos una de las medias de grado alcohólico es diferente.
+```{r comparación de grupos }
+
+modelo_anova <- aov(alcohol ~ categoria_calidad, data = vinos_total)
+resumen_anova <- summary(modelo_anova)
+
+# Extracción de estadísticos
+f_stat <- resumen_anova[[1]]["categoria_calidad", "F value"]
+p_anova <- resumen_anova[[1]]["categoria_calidad", "Pr(>F)"]
+
+kable(resumen_anova[[1]], caption = "Tabla de Análisis de Varianza (ANOVA) para Contenido Alcohólico")
+
+```
+
+
+Estadístico F: $F = `r round(f_stat, 4)`$p-valor: $p = `r format.pval(p_anova)`$Decisión: Como el p-valor es inferior a $0.05$, se rechaza $H_0$. Concluimos que el contenido alcohólico promedio difiere de forma significativa de acuerdo con la categoría de calidad asignada al vino.
+
+
